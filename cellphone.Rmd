@@ -1,0 +1,293 @@
+---
+title: "cellphone"
+author: "Group18"
+date: "2/24/2022"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(textstem)
+library(tm)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(jsonlite)
+library(FactoMineR)
+library(topicmodels)
+```
+
+
+
+```{r}
+data_cell <- read.csv(file = "cellphone_data_2014.csv")
+metadata <- read.csv(file = "cellphone_metadata_2014.csv")
+
+data_cell[1] <- NULL
+metadata[1] <- NULL
+
+
+#join original data with meta data by asin
+com_data<- left_join(data_cell, metadata, by = "asin")
+
+#combine text, summary and title into the reviewText
+com_data$comText <- paste(com_data$reviewText, com_data$summary, com_data$title_1)
+com_data$comText
+
+
+tokens_cell <- com_data %>% 
+  select(review.no, comText, overall) %>% 
+  unnest_tokens(word, comText) %>% 
+  distinct()
+
+
+#dataset <- read.csv(file = "cellphone_pos_tagged.csv")
+#dataset<-rename(dataset, word = token)
+#dataset
+```
+
+
+```{r}
+# Bing Liu
+bing_dictionary <- tidytext::get_sentiments("bing")
+
+
+# Afinn 
+afinn_dictionary <- tidytext::get_sentiments("afinn")
+
+
+# Loughran Dictionary--finance
+lm_dictionary <- tidytext::get_sentiments("loughran")
+
+
+# NRC dictionary (feelings)--a lot of word
+nrc_dictionary <- tidytext::get_sentiments("nrc")
+
+
+#syuzhet dictionary
+syuzhet_dictionary <- syuzhet::get_sentiment_dictionary("syuzhet")
+
+
+#senticnet dictionary
+senticnet_dictionary <- lexicon::hash_sentiment_senticnet
+colnames(senticnet_dictionary) <- c('word','value')
+
+
+#jockers rinker dictionary
+jockers_rinker_dictionary <- lexicon::hash_sentiment_jockers_rinker
+```
+
+
+
+```{r}
+#bing dictionary
+bing_result<-tokens_cell %>% 
+      inner_join(bing_dictionary) %>% 
+      group_by(review.no,sentiment, overall) %>% 
+      summarise(total=n()) %>% 
+      pivot_wider(names_from=sentiment, values_from=total) %>% 
+      replace_na(list(positive=0))%>%
+      replace_na(list(negative=0))%>%
+      mutate(sentiment = (positive-negative)/(positive+negative)) %>%
+      mutate(dictionary="bing") 
+bing_result
+
+#afinn dictionary
+afinn_result <- tokens_cell %>% 
+  inner_join(afinn_dictionary) %>% 
+  group_by(review.no, overall) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(dictionary="afinn") 
+afinn_result 
+
+
+#NRC dictionary
+nrc_result <- tokens_cell %>% 
+    inner_join(nrc_dictionary) %>% 
+    count(review.no,sentiment, overall) %>% 
+    pivot_wider(names_from=sentiment, values_from=n) %>% 
+    replace_na(list(anger=0))%>%
+    replace_na(list(anticipation=0))%>%
+    replace_na(list(disgust=0))%>%
+    replace_na(list(joy=0))%>%
+    replace_na(list(negative=0))%>%
+    replace_na(list(positive=0))%>%
+    replace_na(list(surprise=0))%>%
+    replace_na(list(trust=0))%>%
+    replace_na(list(fear=0))%>%
+    replace_na(list(sadness=0))%>%
+    mutate(sentiment = (positive - negative)/(positive+negative)) %>% 
+    mutate(dictionary = "nrc")
+nrc_result
+
+
+
+#syuzhet dictionary
+syuzhet_result <- tokens_cell %>% 
+  inner_join(syuzhet_dictionary) %>% 
+  group_by(review.no, overall) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(dictionary="syuzhet") 
+syuzhet_result 
+
+
+
+#senticnet dictionary
+senticnet_result <- tokens_cell %>% 
+  inner_join(senticnet_dictionary) %>% 
+  group_by(review.no, overall) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(dictionary="senticnet") 
+senticnet_result 
+
+
+
+#jockers rinker dictionary
+jockers_rinker_result <- tokens_cell %>% 
+  inner_join(senticnet_dictionary) %>% 
+  group_by(review.no, overall) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(dictionary="jockers_rinker") 
+jockers_rinker_result 
+
+
+#lm dictionary
+lm_result<-tokens_cell %>% 
+      inner_join(lm_dictionary) %>% 
+      group_by(review.no,sentiment, overall) %>% 
+      summarise(total=n()) %>% 
+      pivot_wider(names_from=sentiment, values_from=total) %>% 
+      replace_na(list(positive=0))%>%
+      replace_na(list(uncertainty=0))%>%
+      replace_na(list(litigious=0))%>%
+      replace_na(list(negative=0))%>%
+      replace_na(list(superfluous=0))%>%
+      replace_na(list(constraining=0))%>%
+      mutate(sentiment = (positive-negative)/(positive+negative)) %>%
+      mutate(dictionary="lm") 
+lm_result
+summary(lm_result)
+
+
+all_results <- bing_result %>% bind_rows(afinn_result) %>% bind_rows(nrc_result) %>% bind_rows(syuzhet_result ) %>% bind_rows(senticnet_result ) %>% bind_rows(jockers_rinker_result ) %>% bind_rows(lm_dictionary)
+all_results %>% select(review.no,sentiment,dictionary) %>% pivot_wider(names_from = dictionary,values_from=sentiment) -> tocorr
+
+tocorr_no_na <- na.omit(tocorr)
+cor(tocorr_no_na$bing,tocorr_no_na$afinn)
+
+
+```
+
+
+```{r}
+#dictionary choose
+bing_model <- lm(bing_result$overall~bing_result$sentiment)
+summary(bing_model)
+
+afinn_model <- lm(afinn_result$overall~afinn_result$sentiment)
+summary(afinn_model)
+
+nrc_model <- lm(nrc_result$overall~nrc_result$sentiment)
+summary(nrc_model)
+
+syuzhet_model <- lm(syuzhet_result$overall~syuzhet_result$sentiment)
+summary(syuzhet_model)
+
+senticnet_model <- lm(senticnet_result$overall~senticnet_result$sentiment)
+summary(senticnet_model)
+
+jockers_rinker_model <- lm(jockers_rinker_result$overall~jockers_rinker_result$sentiment)
+summary(jockers_rinker_model)
+
+lm_model <- lm(lm_result$overall~lm_result$sentiment)
+summary(lm_model)
+```
+
+
+
+
+```{r}
+#filter exclamation marks
+dataset %>% filter(grepl('!', word))
+
+
+
+```
+
+
+```{r}
+#emoji dictionary
+emoticons_dictionary<-lexicon::hash_emoticons
+emoticons_dictionary$word<-emoticons_dictionary$x
+emoticons_result <- dataset %>% 
+  inner_join(emoticons_dictionary) %>% 
+  group_by(review.no)
+emoticons_result$word<-emoticons_result$y
+
+afinn_emoji_result<-emoticons_result %>% 
+      inner_join(afinn_dictionary)%>% 
+      group_by(review.no) %>% 
+      summarise(sentiment = sum(value))
+```
+
+
+```{r}
+#spelling
+#https://cran.r-project.org/web/packages/hunspell/vignettes/intro.html
+
+library(hunspell)
+#spell_check <- hunspell(com_data$comText)
+#hunspell_suggest(dataset$word[!spell_check])
+spell_check <- hunspell(com_data$comText)
+```
+
+
+```{r}
+#NA in sentiment score
+#https://wiki.q-researchsoftware.com/wiki/Text_Analysis_-_Sentiment
+
+
+```
+
+
+```{r}
+#plot
+bing_plot <- bing_result %>% group_by(sentiment) %>% summarise(bmean = mean(overall))
+plot(bing_plot$sentiment, bing_plot$bmean)
+
+afinn_plot <- afinn_result %>% group_by(sentiment) %>% summarise(amean = mean(overall))
+plot(afinn_plot$sentiment, afinn_plot$amean)
+
+nrc_plot <- nrc_result %>% group_by(sentiment) %>% summarise(nmean = mean(overall))
+plot(nrc_plot$sentiment, nrc_plot$nmean)
+
+syuzhet_plot <- syuzhet_result %>% group_by(sentiment) %>% summarise(symean = mean(overall))
+plot(syuzhet_plot$sentiment,syuzhet_plot$symean)
+
+senticnet_plot <- senticnet_result %>% group_by(sentiment) %>% summarise(semean = mean(overall))
+plot(senticnet_plot$sentiment,senticnet_plot$semean)
+
+jockers_rinker_plot <- jockers_rinker_result %>% group_by(sentiment) %>% summarise(jmean = mean(overall))
+plot(jockers_rinker_plot$sentiment,jockers_rinker_plot$jmean)
+
+lm_plot <- lm_result %>% group_by(sentiment) %>% summarise(lmean = mean(overall))
+plot(lm_plot$sentiment,lm_plot$lmean)
+
+
+
+
+```
+
+
+
+```{r}
+#consider the valence shifters--entire sentence and sentiment words
+library(sentimentr)
+
+sent <- get_sentences(com_data$comText)
+sentiment_by(sent)
+```
+
